@@ -1,0 +1,13 @@
+test:
+  image: jiegec/rust:1.63-bullseye-tuna
+  script:
+    - cargo build
+    - cargo test --test basic_requirements -- --test-threads=1 || touch /tmp/ci.fail
+    - cargo test --test advanced_requirements -- --test-threads=1 || true
+    - "[ ! -f /tmp/ci.fail ]"
+  artifacts:
+    paths:
+      - tests/cases/*.std*
+      - tests/cases/*.http
+    expire_in: 1 year
+    when: always
