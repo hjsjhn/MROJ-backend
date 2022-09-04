@@ -25,7 +25,22 @@
 					"memory_limit": 1048576
 				}
 			]
-		}
+		},
+    	{
+    		"id": 1,
+    		"name": "hello_world",
+    		"type": "standard",
+    		"misc": {},
+    		"cases": [
+    		  {
+    		    "time_limit": 2000000,
+    		    "memory_limit": 0,
+    		    "score": 100,
+    		    "input_file": "./tests/data/hello_world/1.in",
+    		    "answer_file": "./tests/data/hello_world/1.ans"
+    		  }
+    		]
+    	}
 	],
 	"languages": [
 		{
@@ -35,6 +50,17 @@
 				"rustc",
 				"-C",
 				"opt-level=2",
+				"-o",
+				"%OUTPUT%",
+				"%INPUT%"
+			]
+		},
+		{
+			"name": "C++",
+			"file_name": "main.cpp",
+			"command": [
+				"g++",
+				"-O2",
 				"-o",
 				"%OUTPUT%",
 				"%INPUT%"
