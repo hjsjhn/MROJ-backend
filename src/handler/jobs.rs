@@ -101,7 +101,7 @@ pub async fn rejudge_job_by_id(path: web::Path<String>, pool: Data<Mutex<Pool<Sq
     match res {
         Ok(job) => { 
             post = job.get_post(); 
-            ans = HttpResponse::Ok().body(serde_json::to_string_pretty(&vec![job]).unwrap()); 
+            ans = HttpResponse::Ok().body(serde_json::to_string_pretty(&job).unwrap()); 
         }
         Err(e) => { return e; },
     }

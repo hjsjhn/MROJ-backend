@@ -1,7 +1,8 @@
-use file_diff::{diff_files};
+use file_diff;
 use std::fs::File;
 use std::io::{self, BufRead};
 use std::path::Path;
+use std::process::{Command, Stdio};
 
 fn read_lines<P>(filename: P) -> io::Result<io::Lines<io::BufReader<File>>>
 where P: AsRef<Path>, {
@@ -16,23 +17,23 @@ pub fn diff_strict(file1: &str, file2: &str) -> usize {
 }
 
 pub fn diff_standard(file1: &str, file2: &str) -> usize {
-    if let Ok(lines1) = read_lines(file1) {
-        if let Ok(lines2) = read_lines(file2) {
-            for (line1, line2) in lines1.zip(lines2) {
-                if let Ok(out1) = line1 {
-                    if let Ok(out2) = line2 {
-                        if out1.trim_end() != out2.trim_end() {
-                            return 1;
-                        }
-                    } else { return 1; }
-                } else { return 1; }
-            }   
-        } else {
-            return 1;
-        }
-    } else {
-        return 1;
-    }
-
-    0
+   let status = match cfg![target="windows"] {
+        true => Command::new("fc")
+                     .args(["/W", file1, file2])
+                     .stdout(Stdio::null())
+                     .stderr(Stdio::null())
+                     .status(),
+        false => Command::new("diff")
+                     .args(["-w", file1, file2])
+                     .stdout(Stdio::null())
+                     .stderr(Stdio::null())
+                     .status(),
+   };
+   match status {
+        Ok(s) => { 
+            if s.code().unwrap() == 0 { return 0; }
+            else { return 1; }
+        },
+        _ => { return 1; },
+   };
 }

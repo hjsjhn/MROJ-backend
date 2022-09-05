@@ -9,6 +9,7 @@ edition = "2021"
 actix-web = "4.1.0"
 env_logger = "0.9.0"
 log = "0.4.17"
+clap = "3.2.17"
 chrono = "0.4.22"
 dotenv = "0.15.0"
 serde = { version = "1.0.144" , features = ["derive"] }

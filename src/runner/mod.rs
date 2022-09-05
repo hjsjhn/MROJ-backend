@@ -369,6 +369,7 @@ pub async fn run(body: PostJob, pool: Data<Mutex<Pool<SqliteConnectionManager>>>
     let cases = &prob_map.get(&body.problem_id).unwrap().cases;
     let mut score: f32 = 0.0;
     let mut flag: bool = true;
+    println!("{:?}", cases);
     for (index_tmp, case) in cases.iter().enumerate() {
         let index = index_tmp as i32 + 1;
         // Update database

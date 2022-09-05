@@ -1,13 +1,9 @@
-use actix_web::guard::Connect;
 use log;
-use std::env;
 use env_logger;
-// use sqlx::{PgPool, query};
 use rusqlite::{params, Connection};
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use std::fs::File;
-use dotenv::dotenv;
 use std::path::Path;
 use std::error::Error;
 use tokio::sync::Mutex;
@@ -16,6 +12,7 @@ use std::result::Result as StdResult;
 use actix_web::{middleware::Logger, App, HttpServer, Responder};
 use actix_web::web::{self, route, Data};
 use std::collections::HashMap;
+use clap::{Arg, ArgMatches};
 
 mod handler;
 mod config;
@@ -28,6 +25,36 @@ pub type Result<T = (), E = Box<dyn Error>> = StdResult<T, E>;
 async fn main() -> Result {
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
 
+    // Get args
+    let matches = clap::App::new("mroj")
+        .version("0.1.0")
+        .author("Jashng")
+        .about("An online judge backend.")
+        .arg(
+            Arg::with_name("config_path")
+                .short('c')
+                .long("config")
+                .takes_value(true)
+                .help("The config file path."),
+        )
+        .arg(
+            Arg::with_name("flush_data")
+                .short('f')
+                .long("flush-data")
+                .takes_value(false)
+                .help("Toggle to flush OJ data in database.")
+        )
+        .get_matches();
+    if matches.is_present("flush_data") {
+        let _ = std::fs::remove_file("data.db");
+    }
+    let mut config_path: String = "config.json".to_string();
+    if matches.is_present("config_path") {
+        if let Some(path) = matches.value_of("config_path") {
+            config_path = String::from(path);
+        } else { panic!("No config path found."); }
+    }
+
     let manager = SqliteConnectionManager::file("data.db");
     let pool = Pool::new(manager).unwrap();
 
@@ -36,12 +63,8 @@ async fn main() -> Result {
     conn.execute("CREATE TABLE IF NOT EXISTS jobs (id INT, created_time VARCHAR, updated_time VARCHAR, submission_id INT, state VARCHAR, result VARCHAR, score FLOAT, cases INT);", [])?;
     conn.execute("CREATE TABLE IF NOT EXISTS submission (id INT, source_code VARCHAR, language VARCHAR, user_id INT, contest_id INT, problem_id INT);", [])?;
     conn.execute("CREATE TABLE IF NOT EXISTS cases (jobid INT, caseid INT, result VARCHAR, time INT, memory INT, info VARCHAR)", [])?;
-/*
-    dotenv().ok();
-    let pool = PgPool::connect(&env::var("DATABASE_URL")?).await?;
-*/
 
-    let config: config::Config = config::parse_from_file("config.json".to_string()).expect("Config file format error.");
+    let config: config::Config = config::parse_from_file(config_path).expect("Config file format error.");
     let (address, port) = (config.server.bind_address.to_string(), config.server.bind_port);
 
     let mut prob_map = HashMap::new();
@@ -57,6 +80,8 @@ async fn main() -> Result {
         } + 1) as u32)));
     // *jobsid.lock().await += 1;
     println!("{}", *jobsid.lock().await);
+
+    println!("{:?}", config);
 
     log::info!("starting HTTP server at http://{}:{}", address, port);//config.server.bind_address, config.server.bind_port);
     HttpServer::new(move || {
