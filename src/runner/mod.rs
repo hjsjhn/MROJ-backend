@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use chrono::prelude::*;
 
 use crate::config::{self, Config, Problem, Case, ProbType, Ids};
-use crate::handler::jobs::{PostJob, Filter};
+use crate::handler::jobs::{PostJob, JobsFilter};
 use crate::{error_log, users};
 
 mod diff;
@@ -43,7 +43,7 @@ impl SerdeJob {
 }
 
 #[derive(Default, Debug, Deserialize, Serialize)]
-struct SerdeSubmission {
+pub struct SerdeSubmission {
     source_code: String,
     language: String,
     user_id: u32,
@@ -80,6 +80,15 @@ impl Job {
     }
 }
 
+
+pub async fn job_exists (pool: Data<Mutex<Pool<SqliteConnectionManager>>>, job_id: u32) -> bool {
+    let data = pool.lock().await.get().unwrap();
+    let mut stmt = data.prepare(&format!("SELECT * FROM jobs WHERE id = {};", job_id)).expect("Database Error."); 
+    match stmt.exists([]) {
+        Ok(true) => true,
+        _ => false,
+    }
+}
 
 pub async fn get_submission (pool: Data<Mutex<Pool<SqliteConnectionManager>>>, job_id: u32) -> Result<SerdeSubmission, HttpResponse> {
     let data = pool.lock().await.get().unwrap();
@@ -178,12 +187,12 @@ pub async fn get_job (pool: Data<Mutex<Pool<SqliteConnectionManager>>>, job_id: 
 }
 
 
-pub async fn get_jobs(pool: Data<Mutex<Pool<SqliteConnectionManager>>>, mut filter: Filter, ids: Data<Arc<Mutex<Ids>>>) -> HttpResponse {
+pub async fn get_jobs(pool: Data<Mutex<Pool<SqliteConnectionManager>>>, mut filter: JobsFilter, ids: Data<Arc<Mutex<Ids>>>) -> Result<Vec<SerdeJob>, HttpResponse> {
     let mut ans: Vec<SerdeJob> = vec![];
     if let Some(name) = filter.user_name {
         if let Ok(id) = users::get_user_id(pool.clone(), &name).await {
             if let Some(user_id) = filter.user_id {
-                if id != user_id { return HttpResponse::Ok().body("[]"); }
+                if id != user_id { return Err( HttpResponse::Ok().body("[]")); }
             } else {
                 filter.user_id = Some(id);
             }
@@ -220,23 +229,24 @@ pub async fn get_jobs(pool: Data<Mutex<Pool<SqliteConnectionManager>>>, mut filt
         }
         ans.push(job);
     }
-    HttpResponse::Ok().body(serde_json::to_string_pretty(&ans).unwrap())
+    Ok(ans)
 }
 
 
 pub async fn reset_job (pool: Data<Mutex<Pool<SqliteConnectionManager>>>, job_id: u32, prob_map: Data<HashMap<u32, config::Problem>>) -> Result<(), HttpResponse> {
+    if job_exists(pool.clone(), job_id).await {
+        let data = pool.lock().await.get().unwrap();
+        let mut stmt = data.prepare(&format!("SELECT * FROM jobs WHERE id = {};", job_id)).expect("Database Error."); 
+        if !stmt.query([]).unwrap().next().unwrap().unwrap().get::<_,String>(4).unwrap().eq("Finished") {
+            return Err( error_log::INVALID_STATE::webmsg(&format!("Job {} not finished.", job_id)));
+        }
+        drop(stmt);
+        drop(data);
+    } else { 
+        return Err( error_log::NOT_FOUND::webmsg(&format!("Job {} not found.", job_id))); 
+    }
+
     let data = pool.lock().await.get().unwrap();
-
-    let mut stmt = data.prepare(&format!("SELECT * FROM jobs WHERE id = {};", job_id)).expect("Database Error."); 
-    match stmt.exists([]) {
-        Ok(true) => {
-            if !stmt.query([]).unwrap().next().unwrap().unwrap().get::<_,String>(4).unwrap().eq("Finished") {
-                return Err( error_log::INVALID_STATE::webmsg(&format!("Job {} not finished.", job_id)));
-            }
-        },
-        _ => { return Err( error_log::NOT_FOUND::webmsg(&format!("Job {} not found.", job_id))); },
-    };
-
     let prob_id;
     match get_submission(pool.clone(), job_id).await {
         Ok(sub) => { prob_id = sub.problem_id; },

@@ -20,6 +20,7 @@ mod config;
 mod error_log;
 mod runner;
 mod users;
+mod contests;
 
 pub type Result<T = (), E = Box<dyn Error>> = StdResult<T, E>;
 
@@ -66,6 +67,7 @@ async fn main() -> Result {
     conn.execute("CREATE TABLE IF NOT EXISTS submission (id INT, source_code VARCHAR, language VARCHAR, user_id INT, contest_id INT, problem_id INT);", [])?;
     conn.execute("CREATE TABLE IF NOT EXISTS cases (jobid INT, caseid INT, result VARCHAR, time INT, memory INT, info VARCHAR)", [])?;
     conn.execute("CREATE TABLE IF NOT EXISTS users (id INT, name VARCHAR)", [])?;
+    conn.execute("CREATE TABLE IF NOT EXISTS contests (id INT, name VARCHAR, from_time VARCHAR, to_time VARCHAR, problem_ids VARCHAR, user_ids VARCHAR, submission_limit INT)", [])?;
 
     let config: config::Config = config::parse_from_file(config_path).expect("Config file format error.");
     let (address, port) = (config.server.bind_address.to_string(), config.server.bind_port);
@@ -75,12 +77,12 @@ async fn main() -> Result {
         prob_map.insert(prob.id, prob.clone());
     }
 
+    // get the maximal job, user and contest id 
     let mut stmt = conn.prepare("SELECT * FROM jobs ORDER BY id DESC LIMIT 1;")?; 
     let jobsid: i32 = match stmt.exists([]) {
             Ok(true) => stmt.query([])?.next()?.unwrap().get(0)?,
             _ => -1,
         } + 1;
-    // *jobsid.lock().await += 1;
     println!("Max Job ID: {}", jobsid);
 
     let mut stmt = conn.prepare("SELECT * FROM users ORDER BY id DESC LIMIT 1;")?; 
@@ -88,11 +90,17 @@ async fn main() -> Result {
             Ok(true) => stmt.query([])?.next()?.unwrap().get(0)?,
             _ => -1,
         } + 1;
-    // *jobsid.lock().await += 1;
     println!("Max User ID: {}", usersid);
     let flag = usersid == 0;
 
-    let ids = Data::new(Arc::new(Mutex::new(Ids { jobsid: jobsid as u32, usersid: usersid as u32 })));
+    let mut stmt = conn.prepare("SELECT * FROM contests ORDER BY id DESC LIMIT 1;")?; 
+    let contestsid: i32 = match stmt.exists([]) {
+            Ok(true) => stmt.query([])?.next()?.unwrap().get(0)?,
+            _ => 0,
+        } + 1;
+    println!("Max Contest ID: {}", contestsid);
+
+    let ids = Data::new(Arc::new(Mutex::new(Ids { jobsid: jobsid as u32, usersid: usersid as u32, contestsid: contestsid as u32})));
 
     if flag {
         let _ = users::create_user(Data::new(Mutex::new(pool.clone())), "root", ids.clone()).await;

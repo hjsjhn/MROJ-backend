@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 pub struct Ids {
     pub jobsid: u32,
     pub usersid: u32,
+    pub contestsid: u32,
 }
 
 macro_rules! pub_struct {

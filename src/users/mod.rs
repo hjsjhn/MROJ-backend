@@ -1,9 +1,9 @@
 use actix_web::web::Data;
-use actix_web::{delete, get, post, put, web, Responder, HttpResponse, HttpResponseBuilder, HttpRequest};
+use actix_web::HttpResponse;
 use serde::{Deserialize, Serialize};
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
-use rusqlite::{params, Connection, Result};
+use rusqlite::{params, Result};
 // use web::{Json, Path};
 use tokio::sync::Mutex;
 use std::sync::Arc;
@@ -17,6 +17,27 @@ use crate::runner::{self, SerdeJob};
 pub struct SerdeUser {
     id: u32,
     name: String,
+}
+
+
+pub async fn user_name_exists (pool: Data<Mutex<Pool<SqliteConnectionManager>>>, user_name: &str) -> bool {
+    let data = pool.lock().await.get().unwrap();
+    let mut stmt;
+    match data.prepare("SELECT * FROM users WHERE name = :name;") {
+        Ok(s) => stmt = s,
+        _ => { return true; }
+    };
+    stmt.exists(&[(":name", user_name)]).unwrap()
+}
+
+pub async fn user_exists (pool: Data<Mutex<Pool<SqliteConnectionManager>>>, user_id: u32) -> bool {
+    let data = pool.lock().await.get().unwrap();
+    let mut stmt;
+    match data.prepare("SELECT * FROM users WHERE id = :id;") {
+        Ok(s) => stmt = s,
+        _ => { return true; }
+    };
+    stmt.exists(&[(":id", user_id.to_string().as_str())]).unwrap()
 }
 
 pub async fn get_user_id(pool: Data<Mutex<Pool<SqliteConnectionManager>>>, user_name: &str) -> Result<u32, HttpResponse> {
@@ -63,16 +84,6 @@ pub async fn get_user(pool: Data<Mutex<Pool<SqliteConnectionManager>>>, user_id:
     }
 }
 
-pub async fn user_exists (pool: Data<Mutex<Pool<SqliteConnectionManager>>>, user_name: &str) -> bool {
-    let data = pool.lock().await.get().unwrap();
-    let mut stmt;
-    match data.prepare("SELECT * FROM users WHERE name = :name;") {
-        Ok(s) => stmt = s,
-        _ => { return true; }
-    };
-    stmt.exists(&[(":name", user_name)]).unwrap()
-}
-
 pub async fn update_user(pool: Data<Mutex<Pool<SqliteConnectionManager>>>, user_id: u32, user_name: &str) -> HttpResponse {
     println!("Users: Updating User...");
     let mut user: SerdeUser;
@@ -81,7 +92,7 @@ pub async fn update_user(pool: Data<Mutex<Pool<SqliteConnectionManager>>>, user_
         Err(e) => { return e; }
     };
     if !user_name.eq(&user.name) { //Update the names if they are not the same one.
-        if user_exists(pool.clone(), user_name).await {
+        if user_name_exists(pool.clone(), user_name).await {
             return error_log::INVALID_ARGUMENT::webmsg(&format!("User name '{}' already exists.", user_name));
         } else {
             println!("updating now. {}: {} -> {}", user_id, user.name, user_name);
@@ -93,23 +104,24 @@ pub async fn update_user(pool: Data<Mutex<Pool<SqliteConnectionManager>>>, user_
     HttpResponse::Ok().body(serde_json::to_string_pretty(&user).unwrap())
 }
 
-pub async fn create_user(pool: Data<Mutex<Pool<SqliteConnectionManager>>>, user_name: &str, ids: Data<Arc<Mutex<Ids>>>) -> Result<(SerdeUser, u32), HttpResponse> {
+pub async fn create_user(pool: Data<Mutex<Pool<SqliteConnectionManager>>>, user_name: &str, ids: Data<Arc<Mutex<Ids>>>) -> Result<SerdeUser, HttpResponse> {
     println!("Users: Creating User...");
 
-    let user_id: u32 = ids.lock().await.usersid;
-    ids.lock().await.usersid += 1;
-    println!("User ID: {}", user_id);
-
-    if user_exists(pool.clone(), user_name).await {
+    let user_id: u32;
+    // Check if user name exists before increase the counter.
+    if user_name_exists(pool.clone(), user_name).await {
         return Err( error_log::INVALID_ARGUMENT::webmsg(&format!("User name '{}' already exists.", user_name)));
     } else {
+        user_id = ids.lock().await.usersid;
+        ids.lock().await.usersid += 1;
+        println!("User ID: {}", user_id);
         let data = pool.lock().await.get().unwrap();
         if let Err(e) = data.execute("INSERT INTO users (id, name) VALUES (?1, ?2);", params![user_id, user_name]) {
             return Err( error_log::EXTERNAL::webmsg("Database Error."));
         }
     }
 
-    Ok((SerdeUser{ id: user_id, name: user_name.to_string() }, user_id))
+    Ok(SerdeUser{ id: user_id, name: user_name.to_string() })
 }
 
 pub async fn get_users(pool: Data<Mutex<Pool<SqliteConnectionManager>>>) -> Result<Vec<SerdeUser>, HttpResponse> {

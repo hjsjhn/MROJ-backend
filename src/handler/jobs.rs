@@ -12,6 +12,7 @@ use crate::error_log;
 use crate::config::{self, Config, Ids};
 use crate::runner::{self, SerdeJob};
 use crate::users::{self, SerdeUser};
+use crate::contests::{self, SerdeContest};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PostJob {
@@ -29,7 +30,18 @@ pub struct PostUser {
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
-pub struct Filter {
+pub struct PostContest {
+    pub id: Option<u32>,
+    pub name: String,
+    pub from: String,
+    pub to: String,
+    pub problem_ids: Vec<u32>,
+    pub user_ids: Vec<u32>,
+    pub submission_limit: u32,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct JobsFilter {
     pub user_id: Option<u32>,
     pub user_name: Option<String>,
     pub contest_id: Option<u32>,
@@ -39,6 +51,33 @@ pub struct Filter {
     pub to: Option<String>,
     pub state: Option<String>,
     pub result: Option<String>,
+}
+
+#[allow(warnings)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy)]
+pub enum ScoringRule {
+    #[default] latest,
+    highest,
+}
+
+#[allow(warnings)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy)]
+pub enum TieBreaker {
+    submission_time,
+    submission_count,
+    #[default] user_id,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct RankFilter {
+    pub scoring_rule: ScoringRule,
+    pub tie_breaker: TieBreaker,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct SerdeRankFilter {
+    pub scoring_rule: Option<ScoringRule>,
+    pub tie_breaker: Option<TieBreaker>,
 }
 
 #[post("/jobs")]
@@ -79,7 +118,7 @@ pub async fn get_jobs(req: HttpRequest, pool: Data<Mutex<Pool<SqliteConnectionMa
     let reqstr = str::replace(req.query_string(), "+", "🜔");
     println!("{:?}", reqstr);
     
-    match web::Query::<Filter>::from_query(&reqstr) {
+    match web::Query::<JobsFilter>::from_query(&reqstr) {
         Ok(flt) => filter = flt,
         _ => { return error_log::INVALID_ARGUMENT::webmsg("Invalid argument."); },
     };
@@ -87,7 +126,10 @@ pub async fn get_jobs(req: HttpRequest, pool: Data<Mutex<Pool<SqliteConnectionMa
         filter.language = Some(str::replace(language, "🜔", "+"));
     }
 
-    runner::get_jobs(pool, filter.into_inner(), ids).await
+    match runner::get_jobs(pool, filter.into_inner(), ids).await {
+        Ok(jobs) => HttpResponse::Ok().body(serde_json::to_string_pretty(&jobs).unwrap()),
+        Err(e) => e,
+    }
 }
 
 
@@ -127,7 +169,7 @@ pub async fn post_user(body: web::Json<PostUser>, pool: Data<Mutex<Pool<SqliteCo
         users::update_user(pool, id, &body.name).await
     } else {
         match users::create_user(pool, &body.name, ids.clone()).await {
-            Ok(user) => HttpResponse::Ok().body(serde_json::to_string_pretty(&user.0).unwrap()),
+            Ok(user) => HttpResponse::Ok().body(serde_json::to_string_pretty(&user).unwrap()),
             Err(e) => e,
         }
     }
@@ -139,4 +181,76 @@ pub async fn get_users(pool: Data<Mutex<Pool<SqliteConnectionManager>>>) -> Http
         Ok(users) => HttpResponse::Ok().body(serde_json::to_string_pretty(&users).unwrap()),
         Err(e) => e,
     }
+}
+
+#[post("/contests")]
+pub async fn post_contest(body: web::Json<PostContest>, pool: Data<Mutex<Pool<SqliteConnectionManager>>>, ids: Data<Arc<Mutex<Ids>>>, prob_map: Data<HashMap<u32, config::Problem>>) -> HttpResponse {
+    for prob_id in &body.problem_ids {
+        if !prob_map.contains_key(&prob_id) {
+            // return message to be determined
+            return error_log::NOT_FOUND::webmsg(&format!("Problem {} not found", prob_id));
+        }
+    }
+    for user_id in &body.user_ids {
+        if !users::user_exists(pool.clone(), *user_id).await {
+            // return message to be determined
+            return error_log::NOT_FOUND::webmsg(&format!("User {} not found", user_id));
+        }
+    }
+    if let Some(id) = body.id {
+        contests::update_contest(body, pool.clone()).await
+    } else {
+        match contests::create_contest(body.into_inner(), pool.clone(), ids.clone()).await {
+            Ok(contest) => HttpResponse::Ok().body(serde_json::to_string_pretty(&contest).unwrap()),
+            Err(e) => e,
+        }
+    }
+}
+
+#[get("/contests/{contestid}")]
+pub async fn get_contest_by_id(path: web::Path<String>, pool: Data<Mutex<Pool<SqliteConnectionManager>>>) -> HttpResponse {
+    let mut contest_id: u32 = 0;
+    match path.parse::<u32>() {
+        Ok(id) => contest_id = id,
+        _ => { return error_log::NOT_FOUND::webmsg(&format!("Contest {} not found.", path)); }
+    };
+    match contests::get_contest(pool, contest_id).await {
+        Ok(contest) => HttpResponse::Ok().body(serde_json::to_string_pretty(&contest).unwrap()),
+        Err(e) => e,
+    }
+}
+
+#[get("/contests")]
+pub async fn get_contests(pool: Data<Mutex<Pool<SqliteConnectionManager>>>) -> HttpResponse {
+    match contests::get_contests(pool).await {
+        Ok(contests) => HttpResponse::Ok().body(serde_json::to_string_pretty(&contests).unwrap()),
+        Err(e) => e,
+    }
+}
+
+#[get("/contests/{contestid}/ranklist")]
+pub async fn get_global_ranklist(path: web::Path<String>, req: HttpRequest, pool: Data<Mutex<Pool<SqliteConnectionManager>>>, ids: Data<Arc<Mutex<Ids>>>) -> HttpResponse {
+    // get contest id
+    let mut contest_id: u32 = 0;
+    match path.parse::<u32>() {
+        Ok(id) => contest_id = id,
+        _ => { return error_log::NOT_FOUND::webmsg(&format!("Contest {} not found.", path)); }
+    };
+
+    // get filter of the ranklist
+    let mut filter: RankFilter = Default::default();
+    match web::Query::<SerdeRankFilter>::from_query(&req.query_string()) {
+        Ok(flt) => {
+            if let Some(sr) = flt.scoring_rule {
+                filter.scoring_rule = sr;
+            }
+            if let Some(tb) = flt.tie_breaker {
+                filter.tie_breaker = tb;
+            }
+        }
+        _ => { return error_log::INVALID_ARGUMENT::webmsg("Invalid argument."); },
+    };
+    println!("{:?}", filter);
+    //TODO: functions
+    HttpResponse::Ok().body("")
 }
