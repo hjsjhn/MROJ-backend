@@ -3,13 +3,6 @@ use std::error::Error;
 use std::io::BufReader;
 use serde::{Deserialize, Serialize};
 
-
-#[derive(Deserialize, Serialize, Clone, Default, Debug)]
-pub struct Ids {
-    pub jobsid: u32,
-    pub usersid: u32,
-}
-
 macro_rules! pub_struct {
     ($name:ident {$($field:ident: $t:ty,)*}) => {
         #[derive(Deserialize, Serialize, Clone, Default, Debug)] // ewww

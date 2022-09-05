@@ -9,9 +9,9 @@ use tokio::sync::Mutex;
 use std::sync::Arc;
 use std::collections::HashMap;
 use crate::error_log;
-use crate::config::{self, Config, Ids};
+use crate::config::Config;
+use crate::config;
 use crate::runner::{self, SerdeJob};
-use crate::users::{self, SerdeUser};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PostJob {
@@ -20,12 +20,6 @@ pub struct PostJob {
     pub user_id: u32,
     pub contest_id: u32,
     pub problem_id: u32,
-}
-
-#[derive(Debug, Default, Serialize, Deserialize)]
-pub struct PostUser {
-    pub id: Option<u32>,
-    pub name: String,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -43,7 +37,7 @@ pub struct Filter {
 
 #[post("/jobs")]
 pub async fn post_job(body: web::Json<PostJob>, pool: Data<Mutex<Pool<SqliteConnectionManager>>>, config: Data<Config>, prob_map: Data<HashMap<u32, config::Problem>>, 
-    ids: Data<Arc<Mutex<Ids>>>) -> HttpResponse {
+    jobsid: Data<Arc<Mutex<u32>>>) -> HttpResponse {
 
     // check request
     if !config.languages.iter().map(|x| x.name.to_string()).collect::<Vec<String>>().contains(&body.language) {
@@ -52,13 +46,9 @@ pub async fn post_job(body: web::Json<PostJob>, pool: Data<Mutex<Pool<SqliteConn
     if !config.problems.iter().map(|x| x.id).collect::<Vec<u32>>().contains(&body.problem_id) {
         return HttpResponse::NotFound().body(error_log::NOT_FOUND::msg(&format!("Problem with id({}) not found.", body.problem_id)));
     }
-    if let Err(_) = users::get_user(pool.clone(), body.user_id).await {
-        return HttpResponse::NotFound().body(error_log::NOT_FOUND::msg(&format!("User with id({}) not found.", body.user_id)));
-    }
-    // TODO: submission limit check
-    // TODO: check contest_id
+    // TODO: check user_id,contest_id...
 
-    runner::start(body, pool, config, prob_map, ids.clone()).await.unwrap()
+    runner::start(body, pool, config, prob_map, jobsid.clone()).await.unwrap()
 }
 
 
@@ -74,7 +64,7 @@ pub async fn get_job_by_id(path: web::Path<String>, pool: Data<Mutex<Pool<Sqlite
 
 
 #[get("/jobs")]
-pub async fn get_jobs(req: HttpRequest, pool: Data<Mutex<Pool<SqliteConnectionManager>>>, ids: Data<Arc<Mutex<Ids>>>) -> HttpResponse {
+pub async fn get_jobs(req: HttpRequest, pool: Data<Mutex<Pool<SqliteConnectionManager>>>, jobsid: Data<Arc<Mutex<u32>>>) -> HttpResponse {
     let mut filter;
     let reqstr = str::replace(req.query_string(), "+", "🜔");
     println!("{:?}", reqstr);
@@ -87,12 +77,12 @@ pub async fn get_jobs(req: HttpRequest, pool: Data<Mutex<Pool<SqliteConnectionMa
         filter.language = Some(str::replace(language, "🜔", "+"));
     }
 
-    runner::get_jobs(pool, filter.into_inner(), ids).await
+    runner::get_jobs(pool, filter.into_inner(), jobsid).await
 }
 
 
 #[put("/jobs/{jobid}")]
-pub async fn rejudge_job_by_id(path: web::Path<String>, pool: Data<Mutex<Pool<SqliteConnectionManager>>>, ids: Data<Arc<Mutex<Ids>>>, config: Data<Config>, prob_map: Data<HashMap<u32, config::Problem>>) 
+pub async fn rejudge_job_by_id(path: web::Path<String>, pool: Data<Mutex<Pool<SqliteConnectionManager>>>, jobsid: Data<Arc<Mutex<u32>>>, config: Data<Config>, prob_map: Data<HashMap<u32, config::Problem>>) 
     -> HttpResponse {
     println!("Rejuding...");
     let mut job_id: u32 = 0;
@@ -100,7 +90,7 @@ pub async fn rejudge_job_by_id(path: web::Path<String>, pool: Data<Mutex<Pool<Sq
         Ok(id) => job_id = id,
         _ => { return error_log::NOT_FOUND::webmsg(&format!("Job {} not found.", path)); }
     };
-    if job_id >= ids.lock().await.jobsid { return error_log::NOT_FOUND::webmsg(&format!("Job {} not found.", path)); }
+    if job_id >= *jobsid.lock().await { return error_log::NOT_FOUND::webmsg(&format!("Job {} not found.", path)); }
     match runner::reset_job(pool.clone(), job_id, prob_map.clone()).await {
         Err(e) => { return e; },
         _ => {},
@@ -119,24 +109,4 @@ pub async fn rejudge_job_by_id(path: web::Path<String>, pool: Data<Mutex<Pool<Sq
         runner::run(post, pool.clone(), config.clone(), prob_map.clone(), job_id).await;
     });//.await;
     ans
-}
-
-#[post("/users")]
-pub async fn post_user(body: web::Json<PostUser>, pool: Data<Mutex<Pool<SqliteConnectionManager>>>, ids: Data<Arc<Mutex<Ids>>>) -> HttpResponse {
-    if let Some(id) = body.id {
-        users::update_user(pool, id, &body.name).await
-    } else {
-        match users::create_user(pool, &body.name, ids.clone()).await {
-            Ok(user) => HttpResponse::Ok().body(serde_json::to_string_pretty(&user.0).unwrap()),
-            Err(e) => e,
-        }
-    }
-}
-
-#[get("/users")]
-pub async fn get_users(pool: Data<Mutex<Pool<SqliteConnectionManager>>>) -> HttpResponse {
-    match users::get_users(pool).await {
-        Ok(users) => HttpResponse::Ok().body(serde_json::to_string_pretty(&users).unwrap()),
-        Err(e) => e,
-    }
 }
