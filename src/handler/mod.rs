@@ -21,6 +21,8 @@ pub fn route(config: &mut web::ServiceConfig) {
     config.service(jobs::get_job_by_id);
     config.service(jobs::get_jobs);
     config.service(jobs::rejudge_job_by_id);
+    config.service(jobs::post_user);
+    config.service(jobs::get_users);
 }
 
 
