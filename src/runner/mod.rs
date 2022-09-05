@@ -18,9 +18,9 @@ use wait_timeout::ChildExt;
 use std::collections::HashMap;
 use chrono::prelude::*;
 
-use crate::config::{self, Config, Problem, Case, ProbType};
+use crate::config::{self, Config, Problem, Case, ProbType, Ids};
 use crate::handler::jobs::{PostJob, Filter};
-use crate::error_log;
+use crate::{error_log, users};
 
 mod diff;
 
@@ -178,9 +178,18 @@ pub async fn get_job (pool: Data<Mutex<Pool<SqliteConnectionManager>>>, job_id: 
 }
 
 
-pub async fn get_jobs(pool: Data<Mutex<Pool<SqliteConnectionManager>>>, filter: Filter, jobsid: Data<Arc<Mutex<u32>>>) -> HttpResponse {
+pub async fn get_jobs(pool: Data<Mutex<Pool<SqliteConnectionManager>>>, mut filter: Filter, ids: Data<Arc<Mutex<Ids>>>) -> HttpResponse {
     let mut ans: Vec<SerdeJob> = vec![];
-    let tot = *jobsid.lock().await as i32;
+    if let Some(name) = filter.user_name {
+        if let Ok(id) = users::get_user_id(pool.clone(), &name).await {
+            if let Some(user_id) = filter.user_id {
+                if id != user_id { return HttpResponse::Ok().body("[]"); }
+            } else {
+                filter.user_id = Some(id);
+            }
+        }
+    }
+    let tot = ids.lock().await.jobsid as i32;
     for id in 0..tot {
         let job = get_a_job(pool.clone(), id as u32).await.expect("Get Job Error.");
         if let Some(user_id) = filter.user_id {
@@ -254,13 +263,13 @@ pub async fn reset_job (pool: Data<Mutex<Pool<SqliteConnectionManager>>>, job_id
 
 
 async fn create_task (body: web::Json<PostJob>, pool: Data<Mutex<Pool<SqliteConnectionManager>>>, prob_map_shared: Data<HashMap<u32, Problem>>, 
-    jobsid: Data<Arc<Mutex<u32>>>) -> (HttpResponse, u32) {
+    ids: Data<Arc<Mutex<Ids>>>) -> (HttpResponse, u32) {
     println!("Runner: Creating Job...");
 
     let data = pool.lock().await.get().unwrap();
 
-    let job_id: u32 = *jobsid.lock().await;
-    *jobsid.lock().await += 1;
+    let job_id: u32 = ids.lock().await.jobsid;
+    ids.lock().await.jobsid += 1;
     println!("Job ID: {}", job_id);
     
     match data.execute("INSERT INTO submission (id, source_code, language, user_id, contest_id, problem_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)", 
@@ -451,12 +460,12 @@ pub async fn run(body: PostJob, pool: Data<Mutex<Pool<SqliteConnectionManager>>>
 }
 
 
-pub async fn start(body: web::Json<PostJob>, pool: Data<Mutex<Pool<SqliteConnectionManager>>>, config: Data<Config>, prob_map: Data<HashMap<u32, Problem>>, jobsid: Data<Arc<Mutex<u32>>>) 
+pub async fn start(body: web::Json<PostJob>, pool: Data<Mutex<Pool<SqliteConnectionManager>>>, config: Data<Config>, prob_map: Data<HashMap<u32, Problem>>, ids: Data<Arc<Mutex<Ids>>>) 
     -> Result<HttpResponse, Box<dyn std::error::Error>> {
     let pool_shared = pool.clone();
     let prob_map_shared = prob_map.clone();
     let post_job: PostJob = PostJob{ source_code: body.source_code.to_string(), language: body.language.to_string(), user_id: body.user_id, contest_id: body.contest_id, problem_id: body.problem_id };
-    let (ans, job_id) = create_task(body, pool_shared, prob_map_shared, jobsid.clone()).await;
+    let (ans, job_id) = create_task(body, pool_shared, prob_map_shared, ids.clone()).await;
     let _ = tokio::spawn(async move {
         run(post_job, pool.clone(), config.clone(), prob_map.clone(), job_id).await;
     });//.await;

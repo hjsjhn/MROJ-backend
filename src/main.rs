@@ -13,11 +13,13 @@ use actix_web::{middleware::Logger, App, HttpServer, Responder};
 use actix_web::web::{self, route, Data};
 use std::collections::HashMap;
 use clap::{Arg, ArgMatches};
+use config::Ids;
 
 mod handler;
 mod config;
 mod error_log;
 mod runner;
+mod users;
 
 pub type Result<T = (), E = Box<dyn Error>> = StdResult<T, E>;
 
@@ -63,6 +65,7 @@ async fn main() -> Result {
     conn.execute("CREATE TABLE IF NOT EXISTS jobs (id INT, created_time VARCHAR, updated_time VARCHAR, submission_id INT, state VARCHAR, result VARCHAR, score FLOAT, cases INT);", [])?;
     conn.execute("CREATE TABLE IF NOT EXISTS submission (id INT, source_code VARCHAR, language VARCHAR, user_id INT, contest_id INT, problem_id INT);", [])?;
     conn.execute("CREATE TABLE IF NOT EXISTS cases (jobid INT, caseid INT, result VARCHAR, time INT, memory INT, info VARCHAR)", [])?;
+    conn.execute("CREATE TABLE IF NOT EXISTS users (id INT, name VARCHAR)", [])?;
 
     let config: config::Config = config::parse_from_file(config_path).expect("Config file format error.");
     let (address, port) = (config.server.bind_address.to_string(), config.server.bind_port);
@@ -73,13 +76,28 @@ async fn main() -> Result {
     }
 
     let mut stmt = conn.prepare("SELECT * FROM jobs ORDER BY id DESC LIMIT 1;")?; 
-    let jobsid: Data<Arc<Mutex<u32>>> = Data::new(Arc::new(Mutex::new(
-        (match stmt.exists([]) {
+    let jobsid: i32 = match stmt.exists([]) {
             Ok(true) => stmt.query([])?.next()?.unwrap().get(0)?,
             _ => -1,
-        } + 1) as u32)));
+        } + 1;
     // *jobsid.lock().await += 1;
-    println!("{}", *jobsid.lock().await);
+    println!("Max Job ID: {}", jobsid);
+
+    let mut stmt = conn.prepare("SELECT * FROM users ORDER BY id DESC LIMIT 1;")?; 
+    let usersid: i32 = match stmt.exists([]) {
+            Ok(true) => stmt.query([])?.next()?.unwrap().get(0)?,
+            _ => -1,
+        } + 1;
+    // *jobsid.lock().await += 1;
+    println!("Max User ID: {}", usersid);
+    let flag = usersid == 0;
+
+    let ids = Data::new(Arc::new(Mutex::new(Ids { jobsid: jobsid as u32, usersid: usersid as u32 })));
+
+    if flag {
+        let _ = users::create_user(Data::new(Mutex::new(pool.clone())), "root", ids.clone()).await;
+    }
+
 
     println!("{:?}", config);
 
@@ -87,7 +105,7 @@ async fn main() -> Result {
     HttpServer::new(move || {
         App::new()
             .wrap(Logger::default())
-            .app_data(jobsid.clone())
+            .app_data(ids.clone())
             .app_data(Data::new(config.clone()))
             .app_data(Data::new(prob_map.clone()))
             .app_data(Data::new(Mutex::new(pool.clone())))
