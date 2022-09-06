@@ -8,6 +8,8 @@ use rusqlite::{params, Connection, Result};
 use tokio::sync::Mutex;
 use std::sync::Arc;
 use std::collections::HashMap;
+use chrono::prelude::*;
+
 use crate::error_log;
 use crate::config::{self, Config, Ids};
 use crate::runner::{self, SerdeJob};
@@ -86,14 +88,50 @@ pub async fn post_job(body: web::Json<PostJob>, pool: Data<Mutex<Pool<SqliteConn
 
     // check request
     if !config.languages.iter().map(|x| x.name.to_string()).collect::<Vec<String>>().contains(&body.language) {
-        return HttpResponse::NotFound().body(error_log::NOT_FOUND::msg(&format!("Language {} no found.", body.language)));
+        return error_log::NOT_FOUND::webmsg(&format!("Language {} no found.", body.language))
     }
     if !config.problems.iter().map(|x| x.id).collect::<Vec<u32>>().contains(&body.problem_id) {
-        return HttpResponse::NotFound().body(error_log::NOT_FOUND::msg(&format!("Problem with id({}) not found.", body.problem_id)));
+        return error_log::NOT_FOUND::webmsg(&format!("Problem with id({}) not found.", body.problem_id));
     }
     if let Err(_) = users::get_user(pool.clone(), body.user_id).await {
-        return HttpResponse::NotFound().body(error_log::NOT_FOUND::msg(&format!("User with id({}) not found.", body.user_id)));
+        return error_log::NOT_FOUND::webmsg(&format!("User with id({}) not found.", body.user_id));
     }
+    if body.contest_id != 0 && !contests::contest_exists(pool.clone(), body.contest_id).await {
+        return error_log::NOT_FOUND::webmsg(&format!("Contest with id({}) not found.", body.user_id));
+    }
+    if body.contest_id != 0 {
+        let contest = contests::get_contest(pool.clone(), body.contest_id).await.unwrap(); 
+        if !contest.user_ids.contains(&body.user_id) {
+            return error_log::INVALID_ARGUMENT::webmsg(&format!("User {} is not registered in contest {}.", body.user_id, body.contest_id));
+        }
+        if !contest.problem_ids.contains(&body.problem_id) {
+            return error_log::INVALID_ARGUMENT::webmsg(&format!("Problem {} is not in contest {}.", body.problem_id, body.contest_id));
+        }
+        if contest.submission_limit != 0 {
+            let data = pool.lock().await.get().unwrap();
+            let mut stmt;
+            match data.prepare(&format!("SELECT COUNT(*) FROM submission WHERE user_id = {} AND problem_id = {} AND contest_id = {};", body.user_id, body.problem_id, body.contest_id)) {
+                Ok(s) => stmt = s,
+                _ => { return error_log::EXTERNAL::webmsg("Database Error."); }
+            };
+            let mut submission_count: u32 = 0;
+            match stmt.exists([]) {
+                Ok(true) => { submission_count = stmt.query([]).unwrap().next().unwrap().unwrap().get(0).unwrap(); },
+                _ => { return error_log::EXTERNAL::webmsg("Database Error."); }
+            };
+            if submission_count >= contest.submission_limit {
+                return error_log::RATE_LIMIT::webmsg("Too many submissions.");
+            }
+            let time = Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+            if time < contest.from {
+                return error_log::INVALID_ARGUMENT::webmsg("The contest has not started yet.");
+            }
+            if time > contest.to {
+                return error_log::INVALID_ARGUMENT::webmsg("The contest has already finished.");
+            }
+        }
+    }
+
     // TODO: submission limit check
     // TODO: check contest_id
 
