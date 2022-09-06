@@ -23,7 +23,7 @@ pub fn route(config: &mut web::ServiceConfig) {
     config.service(jobs::rejudge_job_by_id);
     config.service(jobs::post_user);
     config.service(jobs::get_users);
-    config.service(jobs::get_global_ranklist);
+    config.service(jobs::get_ranklist);
     config.service(jobs::post_contest);
     config.service(jobs::get_contest_by_id);
     config.service(jobs::get_contests);

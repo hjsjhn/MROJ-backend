@@ -1,3 +1,4 @@
+use chrono::format::DelayedFormat;
 use log;
 use tokio;
 use actix_web::web::Data;
@@ -26,13 +27,13 @@ mod diff;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct SerdeJob {
-    id: u32,
-    created_time: String,
-    updated_time: String,
-    submission: SerdeSubmission,
-    state: String,
-    result: String,
-    score: f32,
+    pub id: u32,
+    pub created_time: String,
+    pub updated_time: String,
+    pub submission: SerdeSubmission,
+    pub state: String,
+    pub result: String,
+    pub score: f32,
     cases: Vec<SerdeCase>,
 }
 
@@ -44,11 +45,11 @@ impl SerdeJob {
 
 #[derive(Default, Debug, Deserialize, Serialize)]
 pub struct SerdeSubmission {
-    source_code: String,
-    language: String,
-    user_id: u32,
-    contest_id: u32,
-    problem_id: u32,
+    pub source_code: String,
+    pub language: String,
+    pub user_id: u32,
+    pub contest_id: u32,
+    pub problem_id: u32,
 }
 
 #[derive(Default, Debug, Deserialize, Serialize)]

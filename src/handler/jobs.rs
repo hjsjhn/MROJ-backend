@@ -67,7 +67,8 @@ pub enum ScoringRule {
 pub enum TieBreaker {
     submission_time,
     submission_count,
-    #[default] user_id,
+    user_id,
+    #[default] none,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -131,9 +132,6 @@ pub async fn post_job(body: web::Json<PostJob>, pool: Data<Mutex<Pool<SqliteConn
             }
         }
     }
-
-    // TODO: submission limit check
-    // TODO: check contest_id
 
     runner::start(body, pool, config, prob_map, ids.clone()).await.unwrap()
 }
@@ -267,7 +265,7 @@ pub async fn get_contests(pool: Data<Mutex<Pool<SqliteConnectionManager>>>) -> H
 }
 
 #[get("/contests/{contestid}/ranklist")]
-pub async fn get_global_ranklist(path: web::Path<String>, req: HttpRequest, pool: Data<Mutex<Pool<SqliteConnectionManager>>>, ids: Data<Arc<Mutex<Ids>>>) -> HttpResponse {
+pub async fn get_ranklist(path: web::Path<String>, req: HttpRequest, pool: Data<Mutex<Pool<SqliteConnectionManager>>>, config: Data<Config>, ids: Data<Arc<Mutex<Ids>>>) -> HttpResponse {
     // get contest id
     let mut contest_id: u32 = 0;
     match path.parse::<u32>() {
@@ -289,6 +287,8 @@ pub async fn get_global_ranklist(path: web::Path<String>, req: HttpRequest, pool
         _ => { return error_log::INVALID_ARGUMENT::webmsg("Invalid argument."); },
     };
     println!("{:?}", filter);
-    //TODO: functions
-    HttpResponse::Ok().body("")
+    match contests::get_ranklist(pool.clone(), config, filter, contest_id, ids.clone()).await {
+        Ok(ans) => HttpResponse::Ok().body(serde_json::to_string_pretty(&ans).unwrap()),
+        Err(e) => e,
+    }
 }
