@@ -37,9 +37,14 @@ pub struct Problem {
     pub name: String,
     #[serde(rename = "type")]
     pub ty: ProbType,
-    // misc: Unknown,
+    pub misc: Misc,
     pub cases: Vec<Case>,
 }
+
+pub_struct!( Misc {
+    packing: Option<Vec<Vec<u32>>>,
+    special_judge: Option<Vec<String>>,
+});
 
 pub_struct!( Case {
     score: f32,

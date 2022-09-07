@@ -20,7 +20,7 @@ fn test_adv_02_10_pts_persistent_storage() {
     TestCase::read("adv_02_persistent_storage").run();
 }
 
-#[test]
+// #[test]
 fn test_adv_03_10_pts_non_blocking_judging() {
     // send multiple jobs with sleep in the code, then poll each of them simultaneously
     // check:
@@ -29,7 +29,7 @@ fn test_adv_03_10_pts_non_blocking_judging() {
     TestCase::read("adv_03_nonblocking_judging").run();
 }
 
-#[test]
+// #[test]
 fn test_adv_04_10_pts_resource_limit() {
     // check that memory usage is not 0
     let results = TestCase::read("adv_04_01_report_memory_usage").run();
@@ -58,14 +58,14 @@ fn test_adv_05_5_pts_packed_judging() {
     TestCase::read("adv_05_packed_judging").run();
 }
 
-#[test]
+// #[test]
 fn test_adv_06_10_pts_special_judge() {
     // check that special judge is supported
     // use a Python script to compare float numbers with tolerance
     TestCase::read("adv_06_special_judge").run();
 }
 
-#[test]
+// #[test]
 fn test_adv_07_10_pts_dynamic_ranking() {
     // check that dynamic ranking is supported
     let results = TestCase::read("adv_07_dynamic_ranking").run();

@@ -8,7 +8,11 @@
 			"id": 0,
 			"name": "aplusb",
 			"type": "standard",
-			"misc": {},
+			"misc": {
+				"packing": [
+					[1, 2]
+				]
+			},
 			"cases": [
 				{
 					"score": 50,

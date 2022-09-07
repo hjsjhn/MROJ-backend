@@ -3,7 +3,7 @@ test:
   script:
     - cargo build
     - cargo test --test basic_requirements -- --test-threads=1 || touch /tmp/ci.fail
-      #    - cargo test --test advanced_requirements -- --test-threads=1 || true
+    - cargo test --test advanced_requirements -- --test-threads=1 || true
     - "[ ! -f /tmp/ci.fail ]"
   artifacts:
     paths:

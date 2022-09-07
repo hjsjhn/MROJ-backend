@@ -76,7 +76,7 @@ struct Job {
 impl Job {
     fn new(id: u32, sub_id: u32) -> Job {
         let time = Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ");
-        Job { id: id, created_time: time.to_string(), updated_time: time.to_string(), submission: sub_id, state: "Queuing".to_string(), 
+        Job { id: id, created_time: time.to_string(), updated_time: time.to_string(), submission: sub_id, state: "Queueing".to_string(), 
             result: "Waiting".to_string(), score: 0.0, cases: vec![] }
     }
 }
@@ -389,75 +389,111 @@ pub async fn run(body: PostJob, pool: Data<Mutex<Pool<SqliteConnectionManager>>>
     let cases = &prob_map.get(&body.problem_id).unwrap().cases;
     let mut score: f32 = 0.0;
     let mut flag: bool = true;
+    let mut indexes: Vec<Vec<u32>> = vec![];
+    match &prob_map.get(&body.problem_id).unwrap().misc.packing {
+        Some(pack) => {
+            for index in pack {
+                let mut tmp_vec = vec![];
+                for i in index { tmp_vec.push(i - 1); }
+                indexes.push(tmp_vec);
+            }
+        },
+        None => {
+            let tot = cases.len();
+            for i in 0..tot {
+                indexes.push(vec![i as u32]);
+            }
+        },
+    };
     println!("{:?}", cases);
-    for (index_tmp, case) in cases.iter().enumerate() {
-        let index = index_tmp as i32 + 1;
-        // Update database
-        let data = pool.lock().await.get().unwrap();
-        let _ = data.execute("UPDATE cases SET result = 'Running' WHERE jobid = ?1 AND caseid = ?2;", params![job_id as i32, index as i32]);
-        drop(data);
+    for index0 in &indexes {
+        let mut skip_flag = false;
+        let mut pack_score: f32 = 0.0;
+        for index_tmp in index0 {
+            let case = &cases[*index_tmp as usize];
+            let index = *index_tmp as i32 + 1;
+            // Check if skipped
+            if skip_flag {
+                let data = pool.lock().await.get().unwrap();
+                let _ = data.execute("UPDATE cases SET result = 'Skipped' WHERE jobid = ?1 AND caseid = ?2;", params![job_id as i32, index as i32]);
+                drop(data);
+                continue;
+            } else {
+                skip_flag = true;
+            }
 
-        // Running
-        let out_file = format!("{}/{}.out", path, index).to_string();
-        let now = Instant::now();
-        let mut runner = Command::new(&bin_path)
-                                .stdin(Stdio::from(std::fs::File::open(&case.input_file).unwrap()))
-                                .stdout(Stdio::from(std::fs::File::create(&out_file).unwrap()))
-                                .stderr(Stdio::null())
-                                .spawn().unwrap();
-        let wait_time = Duration::from_micros(case.time_limit);
-        let mut real_time: u128 = 0;
-        match runner.wait_timeout(wait_time).unwrap() {
-            Some(status) => {
-                if status.code().unwrap() != 0 { //Runtime Error
+            // Update database
+            let data = pool.lock().await.get().unwrap();
+            let _ = data.execute("UPDATE cases SET result = 'Running' WHERE jobid = ?1 AND caseid = ?2;", params![job_id as i32, index as i32]);
+            drop(data);
+
+            // Running
+            let out_file = format!("{}/{}.out", path, index).to_string();
+            let now = Instant::now();
+            let mut runner = Command::new(&bin_path)
+                                    .stdin(Stdio::from(std::fs::File::open(&case.input_file).unwrap()))
+                                    .stdout(Stdio::from(std::fs::File::create(&out_file).unwrap()))
+                                    .stderr(Stdio::null())
+                                    .spawn().unwrap();
+            let wait_time = Duration::from_micros(case.time_limit);
+            let mut real_time: u128 = 0;
+            match runner.wait_timeout(wait_time).unwrap() {
+                Some(status) => {
+                    if status.code().unwrap() != 0 { //Runtime Error
+                        let data = pool.lock().await.get().unwrap();
+                        let _ = data.execute("UPDATE cases SET result = 'Runtime Error' WHERE jobid = ?1 AND caseid = ?2;", params![job_id as i32, index as i32]);
+                        if flag {
+                            let _ = data.execute("UPDATE jobs SET result = 'Runtime Error' WHERE id = ?1;", params![job_id as i32]);
+                            flag = false;
+                        }
+                        drop(data);
+                        continue;
+                    } else { //Exited Normally
+                        real_time = now.elapsed().as_micros();
+                    }
+                }
+                None => { //Time Limit Exceeded
+                    real_time = now.elapsed().as_micros();
                     let data = pool.lock().await.get().unwrap();
-                    let _ = data.execute("UPDATE cases SET result = 'Runtime Error' WHERE jobid = ?1 AND caseid = ?2;", params![job_id as i32, index as i32]);
+                    let _ = data.execute("UPDATE cases SET result = 'Time Limit Exceeded' WHERE jobid = ?1 AND caseid = ?2;", params![job_id as i32, index as i32]);
+                    let _ = data.execute("UPDATE cases SET time = ?1 WHERE jobid = ?2 AND caseid = ?3;", params![real_time as i32, job_id as i32, index as i32]);
                     if flag {
-                        let _ = data.execute("UPDATE jobs SET result = 'Runtime Error' WHERE id = ?1;", params![job_id as i32]);
+                        let _ = data.execute("UPDATE jobs SET result = 'Time Limit Exceeded' WHERE id = ?1;", params![job_id as i32]);
                         flag = false;
                     }
                     drop(data);
                     continue;
-                } else { //Exited Normally
-                    real_time = now.elapsed().as_micros();
-                }
-            }
-            None => { //Time Limit Exceeded
-                real_time = now.elapsed().as_micros();
+                },
+            };
+
+            // Exited Normally
+            let diff_code = match prob_map.get(&body.problem_id).unwrap().ty {
+                ProbType::standard => diff::diff_standard(&case.answer_file, &out_file),
+                ProbType::strict => diff::diff_strict(&case.answer_file, &out_file),
+                // TODO: SPJ
+                _ => 0,
+            };
+            if diff_code == 0 { // Accepted
+                pack_score += case.score;
                 let data = pool.lock().await.get().unwrap();
-                let _ = data.execute("UPDATE cases SET result = 'Time Limit Exceeded' WHERE jobid = ?1 AND caseid = ?2;", params![job_id as i32, index as i32]);
+                let _ = data.execute("UPDATE cases SET result = 'Accepted' WHERE jobid = ?1 AND caseid = ?2;", params![job_id as i32, index as i32]);
                 let _ = data.execute("UPDATE cases SET time = ?1 WHERE jobid = ?2 AND caseid = ?3;", params![real_time as i32, job_id as i32, index as i32]);
+                drop(data);
+                skip_flag = false;
+            } else { // Wrong Answer
+                let data = pool.lock().await.get().unwrap();
+                let _ = data.execute("UPDATE cases SET result = 'Wrong Answer' WHERE jobid = ?1 AND caseid = ?2;", params![job_id as i32, index as i32]);
                 if flag {
-                    let _ = data.execute("UPDATE jobs SET result = 'Time Limit Exceeded' WHERE id = ?1;", params![job_id as i32]);
+                    let _ = data.execute("UPDATE jobs SET result = 'Wrong Answer' WHERE id = ?1;", params![job_id as i32]);
                     flag = false;
                 }
                 drop(data);
-                continue;
-            },
-        };
-
-        // Exited Normally
-        let diff_code = match prob_map.get(&body.problem_id).unwrap().ty {
-            ProbType::standard => diff::diff_standard(&case.answer_file, &out_file),
-            ProbType::strict => diff::diff_strict(&case.answer_file, &out_file),
-            // TODO: SPJ
-            _ => 0,
-        };
-        if diff_code == 0 { // Accepted
-            score += case.score;
-            let data = pool.lock().await.get().unwrap();
-            let _ = data.execute("UPDATE cases SET result = 'Accepted' WHERE jobid = ?1 AND caseid = ?2;", params![job_id as i32, index as i32]);
-            let _ = data.execute("UPDATE cases SET time = ?1 WHERE jobid = ?2 AND caseid = ?3;", params![real_time as i32, job_id as i32, index as i32]);
-            let _ = data.execute("UPDATE jobs SET score = ?1 WHERE id = ?2;", params![score, job_id as i32]);
-            drop(data);
-        } else { // Wrong Answer
-            let data = pool.lock().await.get().unwrap();
-            let _ = data.execute("UPDATE cases SET result = 'Wrong Answer' WHERE jobid = ?1 AND caseid = ?2;", params![job_id as i32, index as i32]);
-            if flag {
-                let _ = data.execute("UPDATE jobs SET result = 'Wrong Answer' WHERE id = ?1;", params![job_id as i32]);
-                flag = false;
             }
-            drop(data);
+            if !skip_flag {
+                score += pack_score;
+                let data = pool.lock().await.get().unwrap();
+                let _ = data.execute("UPDATE jobs SET score = ?1 WHERE id = ?2;", params![score, job_id as i32]);
+            }
         }
     }
 
@@ -471,11 +507,13 @@ pub async fn run(body: PostJob, pool: Data<Mutex<Pool<SqliteConnectionManager>>>
 }
 
 
-pub async fn start(body: web::Json<PostJob>, pool: Data<Mutex<Pool<SqliteConnectionManager>>>, config: Data<Config>, prob_map: Data<HashMap<u32, Problem>>, ids: Data<Arc<Mutex<Ids>>>) 
+pub async fn start(body: web::Json<PostJob>, pool: Data<Mutex<Pool<SqliteConnectionManager>>>, config: Data<Config>, 
+    prob_map: Data<HashMap<u32, Problem>>, ids: Data<Arc<Mutex<Ids>>>) 
     -> Result<HttpResponse, Box<dyn std::error::Error>> {
     let pool_shared = pool.clone();
     let prob_map_shared = prob_map.clone();
-    let post_job: PostJob = PostJob{ source_code: body.source_code.to_string(), language: body.language.to_string(), user_id: body.user_id, contest_id: body.contest_id, problem_id: body.problem_id };
+    let post_job: PostJob = PostJob{ source_code: body.source_code.to_string(), language: body.language.to_string(), 
+        user_id: body.user_id, contest_id: body.contest_id, problem_id: body.problem_id };
     let (ans, job_id) = create_task(body, pool_shared, prob_map_shared, ids.clone()).await;
     let _ = tokio::spawn(async move {
         run(post_job, pool.clone(), config.clone(), prob_map.clone(), job_id).await;
