@@ -58,7 +58,7 @@ fn test_adv_05_5_pts_packed_judging() {
     TestCase::read("adv_05_packed_judging").run();
 }
 
-// #[test]
+#[test]
 fn test_adv_06_10_pts_special_judge() {
     // check that special judge is supported
     // use a Python script to compare float numbers with tolerance

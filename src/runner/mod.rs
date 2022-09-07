@@ -470,7 +470,46 @@ pub async fn run(body: PostJob, pool: Data<Mutex<Pool<SqliteConnectionManager>>>
             let diff_code = match prob_map.get(&body.problem_id).unwrap().ty {
                 ProbType::standard => diff::diff_standard(&case.answer_file, &out_file),
                 ProbType::strict => diff::diff_strict(&case.answer_file, &out_file),
-                // TODO: SPJ
+                ProbType::spj => {
+                    let mut spj_info: Vec<String> = vec![];
+                    match &prob_map.get(&body.problem_id).unwrap().misc.special_judge {
+                        Some(info) => {
+                            spj_info = info.to_vec();
+                        },
+                        None => {
+                            let data = pool.lock().await.get().unwrap();
+                            let _ = data.execute("UPDATE cases SET result = 'SPJ Error' WHERE jobid = ?1 AND caseid = ?2;", params![job_id as i32, index as i32]);
+                            let _ = data.execute("UPDATE cases SET info = 'No SPJ specified in config: misc' WHERE jobid = ?1 AND caseid = ?2;", params![job_id as i32, index as i32]);
+                            drop(data);
+                            continue;
+                        },
+                    }
+                    for i in 0..spj_info.len() {
+                        if spj_info[i].eq("%OUTPUT%") {
+                            // out_index = Some()
+                            spj_info[i] = out_file.to_string();
+                        } else if spj_info[i].eq("%ANSWER%") {
+                            spj_info[i] = case.answer_file.to_string();
+                        }
+                    }
+                    let ans: usize;
+                    match diff::diff_spj(&spj_info).await {
+                        Ok(info) => {
+                            ans = info.0;
+                            let data = pool.lock().await.get().unwrap();
+                            let _ = data.execute("UPDATE cases SET info = ?1 WHERE jobid = ?2 AND caseid = ?3;",  params![info.1, job_id as i32, index as i32]);
+                            drop(data);
+                        },
+                        Err(_) => {
+                            let data = pool.lock().await.get().unwrap();
+                            let _ = data.execute("UPDATE cases SET result = 'SPJ Error' WHERE jobid = ?1 AND caseid = ?2;", params![job_id as i32, index as i32]);
+                            let _ = data.execute("UPDATE cases SET info = 'No SPJ specified in config: misc' WHERE jobid = ?1 AND caseid = ?2;", params![job_id as i32, index as i32]);
+                            drop(data);
+                            continue;
+                        }
+                    };
+                    ans
+                },
                 _ => 0,
             };
             if diff_code == 0 { // Accepted

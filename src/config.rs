@@ -4,6 +4,9 @@ use std::io::BufReader;
 use serde::{Deserialize, Serialize};
 
 
+pub const RESULTS: &[&str] = &["Waiting", "Running", "Accepted", "Compilation Error", "Compilation Success", "Wrong Answer", "Runtime Error", "Time Limit Exceeded", "Memory Limit Exceeded", "System Error", "SPJ Error", "Skipped"];
+
+
 #[derive(Deserialize, Serialize, Clone, Default, Debug)]
 pub struct Ids {
     pub jobsid: u32,
