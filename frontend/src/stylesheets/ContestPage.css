@@ -1,0 +1,27 @@
+.ContestListPage #body {
+    display: flex;
+    flex-wrap: wrap;
+}
+
+.ContestListPage .ContestItem {
+    /* box-shadow: 0 0 2px; */
+    box-shadow: rgba(136, 165, 191, 0.48) 6px 2px 16px 0px, rgba(255, 255, 255, 0.8) -6px -2px 16px 0px;
+    border-radius:10px;
+    padding: 10px;
+    margin: 10px;
+    cursor: pointer;
+}
+
+.ContestListPage .ContestItem p {
+    margin: 3px;
+}
+.ContestPage .button {
+    width: 80px;
+    margin-left: auto;
+    margin-right: auto;
+    padding: 3px 8px;
+    text-align: center;
+    border-radius: 5px;
+    box-shadow: 0 0 2px;
+    cursor: pointer;
+}

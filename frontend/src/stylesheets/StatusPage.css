@@ -1,0 +1,50 @@
+.StatusDetailsPage #info {
+    display: flex;
+}
+.StatusDetailsPage #info .line{
+    margin-right: 20px;
+}
+.StatusDetailsPage #detail {
+    display: flex;
+}
+.StatusDetailsPage #source {
+    width: 1000px;
+    padding: 10px;
+    border: 1px solid;
+}
+.StatusDetailsPage .detailItem {
+    /* box-shadow: 0 0 2px; */
+    box-shadow: rgba(136, 165, 191, 0.48) 6px 2px 16px 0px, rgba(255, 255, 255, 0.8) -6px -2px 16px 0px;
+    border-radius:10px;
+    margin: 10px;
+    padding: 10px;
+}
+
+.StatusPage .button {
+    width: 80px;
+    margin-left: auto;
+    margin-right: auto;
+    padding: 3px 8px;
+    text-align: center;
+    border-radius: 5px;
+    box-shadow: 0 0 2px;
+    cursor: pointer;
+}
+
+.StatusListPage {
+    display: flex;
+    flex-wrap: wrap;
+}
+
+.StatusListPage .StatusItem {
+    /* box-shadow: 0 0 2px; */
+    box-shadow: rgba(136, 165, 191, 0.48) 6px 2px 16px 0px, rgba(255, 255, 255, 0.8) -6px -2px 16px 0px;
+    border-radius:10px;
+    padding: 10px;
+    margin: 10px;
+    cursor: pointer;
+}
+
+.StatusListPage .StatusItem p {
+    margin: 3px;
+}

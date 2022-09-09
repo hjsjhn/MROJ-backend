@@ -1,20 +1,19 @@
 use actix_web::web::Data;
-use actix_web::{delete, get, post, put, web, Responder, HttpResponse, HttpResponseBuilder, HttpRequest};
-use serde::{Deserialize, Serialize};
+use actix_web::{get, post, put, web, HttpRequest, HttpResponse};
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
-use rusqlite::{params, Connection, Result};
+use serde::{Deserialize, Serialize};
 // use web::{Json, Path};
-use tokio::sync::Mutex;
-use std::sync::Arc;
-use std::collections::HashMap;
 use chrono::prelude::*;
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
-use crate::error_log;
 use crate::config::{self, Config, Ids};
-use crate::runner::{self, SerdeJob};
-use crate::users::{self, SerdeUser};
-use crate::contests::{self, SerdeContest};
+use crate::contests;
+use crate::error_log;
+use crate::runner;
+use crate::users;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PostJob {
@@ -58,7 +57,8 @@ pub struct JobsFilter {
 #[allow(warnings)]
 #[derive(Debug, Default, Serialize, Deserialize, Clone, Copy)]
 pub enum ScoringRule {
-    #[default] latest,
+    #[default]
+    latest,
     highest,
 }
 
@@ -68,7 +68,8 @@ pub enum TieBreaker {
     submission_time,
     submission_count,
     user_id,
-    #[default] none,
+    #[default]
+    none,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -84,29 +85,59 @@ pub struct SerdeRankFilter {
 }
 
 #[post("/jobs")]
-pub async fn post_job(body: web::Json<PostJob>, pool: Data<Mutex<Pool<SqliteConnectionManager>>>, config: Data<Config>, prob_map: Data<HashMap<u32, config::Problem>>, 
-    ids: Data<Arc<Mutex<Ids>>>) -> HttpResponse {
-
+pub async fn post_job(
+    body: web::Json<PostJob>,
+    pool: Data<Mutex<Pool<SqliteConnectionManager>>>,
+    config: Data<Config>,
+    prob_map: Data<HashMap<u32, config::Problem>>,
+    ids: Data<Arc<Mutex<Ids>>>,
+) -> HttpResponse {
     // check request
-    if !config.languages.iter().map(|x| x.name.to_string()).collect::<Vec<String>>().contains(&body.language) {
-        return error_log::NOT_FOUND::webmsg(&format!("Language {} no found.", body.language))
+    if !config
+        .languages
+        .iter()
+        .map(|x| x.name.to_string())
+        .collect::<Vec<String>>()
+        .contains(&body.language)
+    {
+        return error_log::NOT_FOUND::webmsg(&format!("Language {} no found.", body.language));
     }
-    if !config.problems.iter().map(|x| x.id).collect::<Vec<u32>>().contains(&body.problem_id) {
-        return error_log::NOT_FOUND::webmsg(&format!("Problem with id({}) not found.", body.problem_id));
+    if !config
+        .problems
+        .iter()
+        .map(|x| x.id)
+        .collect::<Vec<u32>>()
+        .contains(&body.problem_id)
+    {
+        return error_log::NOT_FOUND::webmsg(&format!(
+            "Problem with id({}) not found.",
+            body.problem_id
+        ));
     }
     if let Err(_) = users::get_user(pool.clone(), body.user_id).await {
         return error_log::NOT_FOUND::webmsg(&format!("User with id({}) not found.", body.user_id));
     }
     if body.contest_id != 0 && !contests::contest_exists(pool.clone(), body.contest_id).await {
-        return error_log::NOT_FOUND::webmsg(&format!("Contest with id({}) not found.", body.user_id));
+        return error_log::NOT_FOUND::webmsg(&format!(
+            "Contest with id({}) not found.",
+            body.user_id
+        ));
     }
     if body.contest_id != 0 {
-        let contest = contests::get_contest(pool.clone(), body.contest_id).await.unwrap(); 
+        let contest = contests::get_contest(pool.clone(), body.contest_id)
+            .await
+            .unwrap();
         if !contest.user_ids.contains(&body.user_id) {
-            return error_log::INVALID_ARGUMENT::webmsg(&format!("User {} is not registered in contest {}.", body.user_id, body.contest_id));
+            return error_log::INVALID_ARGUMENT::webmsg(&format!(
+                "User {} is not registered in contest {}.",
+                body.user_id, body.contest_id
+            ));
         }
         if !contest.problem_ids.contains(&body.problem_id) {
-            return error_log::INVALID_ARGUMENT::webmsg(&format!("Problem {} is not in contest {}.", body.problem_id, body.contest_id));
+            return error_log::INVALID_ARGUMENT::webmsg(&format!(
+                "Problem {} is not in contest {}.",
+                body.problem_id, body.contest_id
+            ));
         }
         if contest.submission_limit != 0 {
             let data = pool.lock().await.get().unwrap();
@@ -117,8 +148,19 @@ pub async fn post_job(body: web::Json<PostJob>, pool: Data<Mutex<Pool<SqliteConn
             };
             let mut submission_count: u32 = 0;
             match stmt.exists([]) {
-                Ok(true) => { submission_count = stmt.query([]).unwrap().next().unwrap().unwrap().get(0).unwrap(); },
-                _ => { return error_log::EXTERNAL::webmsg("Database Error."); }
+                Ok(true) => {
+                    submission_count = stmt
+                        .query([])
+                        .unwrap()
+                        .next()
+                        .unwrap()
+                        .unwrap()
+                        .get(0)
+                        .unwrap();
+                }
+                _ => {
+                    return error_log::EXTERNAL::webmsg("Database Error.");
+                }
             };
             if submission_count >= contest.submission_limit {
                 return error_log::RATE_LIMIT::webmsg("Too many submissions.");
@@ -133,30 +175,41 @@ pub async fn post_job(body: web::Json<PostJob>, pool: Data<Mutex<Pool<SqliteConn
         }
     }
 
-    runner::start(body, pool, config, prob_map, ids.clone()).await.unwrap()
+    runner::start(body, pool, config, prob_map, ids.clone())
+        .await
+        .unwrap()
 }
 
-
 #[get("/jobs/{jobid}")]
-pub async fn get_job_by_id(path: web::Path<String>, pool: Data<Mutex<Pool<SqliteConnectionManager>>>) -> HttpResponse {
+pub async fn get_job_by_id(
+    path: web::Path<String>,
+    pool: Data<Mutex<Pool<SqliteConnectionManager>>>,
+) -> HttpResponse {
     let mut job_id: u32 = 0;
     match path.parse::<u32>() {
         Ok(id) => job_id = id,
-        _ => { return error_log::NOT_FOUND::webmsg(&format!("Job {} not found.", path)); }
+        _ => {
+            return error_log::NOT_FOUND::webmsg(&format!("Job {} not found.", path));
+        }
     };
     runner::get_job(pool, job_id).await
 }
 
-
 #[get("/jobs")]
-pub async fn get_jobs(req: HttpRequest, pool: Data<Mutex<Pool<SqliteConnectionManager>>>, ids: Data<Arc<Mutex<Ids>>>) -> HttpResponse {
+pub async fn get_jobs(
+    req: HttpRequest,
+    pool: Data<Mutex<Pool<SqliteConnectionManager>>>,
+    ids: Data<Arc<Mutex<Ids>>>,
+) -> HttpResponse {
     let mut filter;
     let reqstr = str::replace(req.query_string(), "+", "🜔");
     println!("{:?}", reqstr);
-    
+
     match web::Query::<JobsFilter>::from_query(&reqstr) {
         Ok(flt) => filter = flt,
-        _ => { return error_log::INVALID_ARGUMENT::webmsg("Invalid argument."); },
+        _ => {
+            return error_log::INVALID_ARGUMENT::webmsg("Invalid argument.");
+        }
     };
     if let Some(language) = &filter.language {
         filter.language = Some(str::replace(language, "🜔", "+"));
@@ -168,39 +221,55 @@ pub async fn get_jobs(req: HttpRequest, pool: Data<Mutex<Pool<SqliteConnectionMa
     }
 }
 
-
 #[put("/jobs/{jobid}")]
-pub async fn rejudge_job_by_id(path: web::Path<String>, pool: Data<Mutex<Pool<SqliteConnectionManager>>>, ids: Data<Arc<Mutex<Ids>>>, config: Data<Config>, prob_map: Data<HashMap<u32, config::Problem>>) 
-    -> HttpResponse {
+pub async fn rejudge_job_by_id(
+    path: web::Path<String>,
+    pool: Data<Mutex<Pool<SqliteConnectionManager>>>,
+    ids: Data<Arc<Mutex<Ids>>>,
+    config: Data<Config>,
+    prob_map: Data<HashMap<u32, config::Problem>>,
+) -> HttpResponse {
     println!("Rejuding...");
     let mut job_id: u32 = 0;
     match path.parse::<u32>() {
         Ok(id) => job_id = id,
-        _ => { return error_log::NOT_FOUND::webmsg(&format!("Job {} not found.", path)); }
+        _ => {
+            return error_log::NOT_FOUND::webmsg(&format!("Job {} not found.", path));
+        }
     };
-    if job_id >= ids.lock().await.jobsid { return error_log::NOT_FOUND::webmsg(&format!("Job {} not found.", path)); }
+    if job_id >= ids.lock().await.jobsid {
+        return error_log::NOT_FOUND::webmsg(&format!("Job {} not found.", path));
+    }
     match runner::reset_job(pool.clone(), job_id, prob_map.clone()).await {
-        Err(e) => { return e; },
-        _ => {},
+        Err(e) => {
+            return e;
+        }
+        _ => {}
     }
     let res = runner::get_a_job(pool.clone(), job_id).await;
     let ans;
     let post;
     match res {
-        Ok(job) => { 
-            post = job.get_post(); 
-            ans = HttpResponse::Ok().body(serde_json::to_string_pretty(&job).unwrap()); 
+        Ok(job) => {
+            post = job.get_post();
+            ans = HttpResponse::Ok().body(serde_json::to_string_pretty(&job).unwrap());
         }
-        Err(e) => { return e; },
+        Err(e) => {
+            return e;
+        }
     }
     let _ = tokio::spawn(async move {
         runner::run(post, pool.clone(), config.clone(), prob_map.clone(), job_id).await;
-    });//.await;
+    }); //.await;
     ans
 }
 
 #[post("/users")]
-pub async fn post_user(body: web::Json<PostUser>, pool: Data<Mutex<Pool<SqliteConnectionManager>>>, ids: Data<Arc<Mutex<Ids>>>) -> HttpResponse {
+pub async fn post_user(
+    body: web::Json<PostUser>,
+    pool: Data<Mutex<Pool<SqliteConnectionManager>>>,
+    ids: Data<Arc<Mutex<Ids>>>,
+) -> HttpResponse {
     if let Some(id) = body.id {
         users::update_user(pool, id, &body.name).await
     } else {
@@ -220,7 +289,12 @@ pub async fn get_users(pool: Data<Mutex<Pool<SqliteConnectionManager>>>) -> Http
 }
 
 #[post("/contests")]
-pub async fn post_contest(body: web::Json<PostContest>, pool: Data<Mutex<Pool<SqliteConnectionManager>>>, ids: Data<Arc<Mutex<Ids>>>, prob_map: Data<HashMap<u32, config::Problem>>) -> HttpResponse {
+pub async fn post_contest(
+    body: web::Json<PostContest>,
+    pool: Data<Mutex<Pool<SqliteConnectionManager>>>,
+    ids: Data<Arc<Mutex<Ids>>>,
+    prob_map: Data<HashMap<u32, config::Problem>>,
+) -> HttpResponse {
     for prob_id in &body.problem_ids {
         if !prob_map.contains_key(&prob_id) {
             // return message to be determined
@@ -244,11 +318,16 @@ pub async fn post_contest(body: web::Json<PostContest>, pool: Data<Mutex<Pool<Sq
 }
 
 #[get("/contests/{contestid}")]
-pub async fn get_contest_by_id(path: web::Path<String>, pool: Data<Mutex<Pool<SqliteConnectionManager>>>) -> HttpResponse {
+pub async fn get_contest_by_id(
+    path: web::Path<String>,
+    pool: Data<Mutex<Pool<SqliteConnectionManager>>>,
+) -> HttpResponse {
     let mut contest_id: u32 = 0;
     match path.parse::<u32>() {
         Ok(id) => contest_id = id,
-        _ => { return error_log::NOT_FOUND::webmsg(&format!("Contest {} not found.", path)); }
+        _ => {
+            return error_log::NOT_FOUND::webmsg(&format!("Contest {} not found.", path));
+        }
     };
     match contests::get_contest(pool, contest_id).await {
         Ok(contest) => HttpResponse::Ok().body(serde_json::to_string_pretty(&contest).unwrap()),
@@ -265,12 +344,20 @@ pub async fn get_contests(pool: Data<Mutex<Pool<SqliteConnectionManager>>>) -> H
 }
 
 #[get("/contests/{contestid}/ranklist")]
-pub async fn get_ranklist(path: web::Path<String>, req: HttpRequest, pool: Data<Mutex<Pool<SqliteConnectionManager>>>, config: Data<Config>, ids: Data<Arc<Mutex<Ids>>>) -> HttpResponse {
+pub async fn get_ranklist(
+    path: web::Path<String>,
+    req: HttpRequest,
+    pool: Data<Mutex<Pool<SqliteConnectionManager>>>,
+    config: Data<Config>,
+    ids: Data<Arc<Mutex<Ids>>>,
+) -> HttpResponse {
     // get contest id
     let mut contest_id: u32 = 0;
     match path.parse::<u32>() {
         Ok(id) => contest_id = id,
-        _ => { return error_log::NOT_FOUND::webmsg(&format!("Contest {} not found.", path)); }
+        _ => {
+            return error_log::NOT_FOUND::webmsg(&format!("Contest {} not found.", path));
+        }
     };
 
     // get filter of the ranklist
@@ -284,7 +371,9 @@ pub async fn get_ranklist(path: web::Path<String>, req: HttpRequest, pool: Data<
                 filter.tie_breaker = tb;
             }
         }
-        _ => { return error_log::INVALID_ARGUMENT::webmsg("Invalid argument."); },
+        _ => {
+            return error_log::INVALID_ARGUMENT::webmsg("Invalid argument.");
+        }
     };
     println!("{:?}", filter);
     match contests::get_ranklist(pool.clone(), config, filter, contest_id, ids.clone()).await {

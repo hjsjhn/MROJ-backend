@@ -1,11 +1,21 @@
-use std::fs::File;
-use std::error::Error;
-use std::io::BufReader;
 use serde::{Deserialize, Serialize};
+use std::fs::File;
+use std::io::BufReader;
 
-
-pub const RESULTS: &[&str] = &["Waiting", "Running", "Accepted", "Compilation Error", "Compilation Success", "Wrong Answer", "Runtime Error", "Time Limit Exceeded", "Memory Limit Exceeded", "System Error", "SPJ Error", "Skipped"];
-
+pub const RESULTS: &[&str] = &[
+    "Waiting",
+    "Running",
+    "Accepted",
+    "Compilation Error",
+    "Compilation Success",
+    "Wrong Answer",
+    "Runtime Error",
+    "Time Limit Exceeded",
+    "Memory Limit Exceeded",
+    "System Error",
+    "SPJ Error",
+    "Skipped",
+];
 
 #[derive(Deserialize, Serialize, Clone, Default, Debug)]
 pub struct Ids {
@@ -29,7 +39,7 @@ pub_struct!( Config {
     languages: Vec<Language>,
 });
 
-pub_struct!( Server {
+pub_struct!(Server {
     bind_address: String,
     bind_port: u16,
 });
@@ -49,7 +59,7 @@ pub_struct!( Misc {
     special_judge: Option<Vec<String>>,
 });
 
-pub_struct!( Case {
+pub_struct!(Case {
     score: f32,
     input_file: String,
     answer_file: String,
@@ -65,7 +75,8 @@ pub_struct!( Language {
 
 #[derive(Deserialize, Serialize, Clone, Default, Debug)]
 pub enum ProbType {
-    #[default] standard,
+    #[default]
+    standard,
     strict,
     spj,
     dynamic_ranking,
@@ -73,5 +84,5 @@ pub enum ProbType {
 
 pub fn parse_from_file(config_path: String) -> Result<Config, serde_json::Error> {
     let file = File::open(config_path).expect("Cannot read config file");
-    serde_json::from_reader(BufReader::new(file))//.expect("Config file has a wrong json format.")
+    serde_json::from_reader(BufReader::new(file)) //.expect("Config file has a wrong json format.")
 }
