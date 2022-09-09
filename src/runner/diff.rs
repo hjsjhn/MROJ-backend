@@ -40,14 +40,16 @@ pub fn diff_standard(file1: &str, file2: &str) -> usize {
 }
 
 pub async fn diff_spj(spj_info: &Vec<String>) -> Result<(usize, String), ()> {
-    let mut output = Command::new(&spj_info[0])
+    let mut output;
+    match Command::new(&spj_info[0])
         .args(&spj_info[1..])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
-        .output()
-        .unwrap()
-        .stdout;
+        .output() {
+            Ok(out) => { output = out.stdout; }
+            _ => { return Err(()); }
+        };
 
     let stdout = String::from_utf8(output).unwrap();
     let outputs: Vec<&str> = stdout.trim().split('\n').collect();

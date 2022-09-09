@@ -215,6 +215,17 @@ pub async fn get_jobs(
         filter.language = Some(str::replace(language, "🜔", "+"));
     }
 
+    if let Some(str) = &filter.from {
+        if let Err(_) = NaiveDateTime::parse_from_str(str, "%Y-%m-%dT%H:%M:%S%.3fZ") {
+            return HttpResponse::Ok().body("[]");
+        }
+    }
+    if let Some(str) = &filter.to {
+        if let Err(_) = NaiveDateTime::parse_from_str(str, "%Y-%m-%dT%H:%M:%S%.3fZ") {
+            return HttpResponse::Ok().body("[]");
+        }
+    }
+
     match runner::get_jobs(pool, filter.into_inner(), ids).await {
         Ok(jobs) => HttpResponse::Ok().body(serde_json::to_string_pretty(&jobs).unwrap()),
         Err(e) => e,
