@@ -319,6 +319,7 @@ pub async fn post_contest(
         }
     }
     if let Some(id) = body.id {
+        if id == 0 { return error_log::INVALID_ARGUMENT::webmsg("Cannot change contest 0."); }
         contests::update_contest(body, pool.clone()).await
     } else {
         match contests::create_contest(body.into_inner(), pool.clone(), ids.clone()).await {
