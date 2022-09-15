@@ -26,9 +26,9 @@ async fn main() -> Result {
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
 
     // Get args
-    let matches = clap::App::new("mroj")
-        .version("0.1.0")
-        .author("Jashng")
+    let matches = clap::App::new("mroj-backend")
+        .version("0.2.0")
+        .author("hjsjhn")
         .about("An online judge backend.")
         .arg(
             Arg::with_name("config_path")

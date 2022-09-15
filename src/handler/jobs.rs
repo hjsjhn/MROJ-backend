@@ -57,8 +57,8 @@ pub struct JobsFilter {
 #[allow(warnings)]
 #[derive(Debug, Default, Serialize, Deserialize, Clone, Copy)]
 pub enum ScoringRule {
-    #[default]
     latest,
+    #[default]
     highest,
 }
 
