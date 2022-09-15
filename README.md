@@ -1,4 +1,6 @@
-<img src="MROJ_logo.png" alt="MROJ_logo" style="zoom: 25%;" />
+<p align="center">
+  <img src="MROJ_logo.png" alt="MROJ_logo" width="300" />
+</p>
 
 # MROJ - Making a Rust Oneline Judge
 
@@ -40,3 +42,4 @@ Some of the APIs was given by the TAs of the course mentioned before. I must off
 Given that the backend and the frontend are divided, the APIs are all HTTP requests and responses.
 
 You can get all APIs [here](https://github.com/hjsjhn/MROJ-backend/wiki#apis).
+
