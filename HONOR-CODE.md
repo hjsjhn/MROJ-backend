@@ -1,2 +1,0 @@
-# Honor Code
-## Referrence
